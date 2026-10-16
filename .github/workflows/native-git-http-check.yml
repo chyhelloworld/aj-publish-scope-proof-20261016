@@ -1,4 +1,4 @@
-name: Native Git boundary HTTP verification
+name: Published blog snapshot verification
 on:
   push:
     branches: [codex/native-git-http-check]
@@ -7,34 +7,159 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 8
     steps:
-      - name: Verify recovered-v3
+      - uses: actions/checkout@v6
+        with:
+          ref: f91bc71303a8550fcef62b2341415f74a1239442
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Prepare browser verifier in the cloud runner
+        run: python -m pip install --disable-pip-version-check playwright==1.64.0
+      - name: Verify published pages, images, and private-content exclusion
+        env:
+          PUBLICATION_COMMIT: f91bc71303a8550fcef62b2341415f74a1239442
         run: |
-          node <<'NODE'
-          const fs=require('node:fs');
-          const crypto=require('node:crypto');
-          (async()=>{
-           const expected={"stage":"recovered-v3","version":3,"marker":"native-git-v3-recovered-20261016"};
-           const origin="https://aj-native-git-proof-20261016-qbkyvyub.edgeone.dev";
-           const nonce=process.env.GITHUB_RUN_ID+'-'+expected.stage;
-           const [proofResponse,htmlResponse,productionResponse]=await Promise.all([
-            fetch(origin+'/proof.json?boundary='+nonce,{signal:AbortSignal.timeout(20000)}),
-            fetch(origin+'/?boundary='+nonce,{signal:AbortSignal.timeout(20000)}),
-            fetch('https://aj.new.tg/',{signal:AbortSignal.timeout(20000)})
-           ]);
-           const proofText=await proofResponse.text();
-           let proof;try{proof=JSON.parse(proofText);}catch{}
-           const html=await htmlResponse.text();
-           const productionHash=crypto.createHash('sha256').update(Buffer.from(await productionResponse.arrayBuffer())).digest('hex');
-           const result={observedAt:new Date().toISOString(),expected,source:'GitHub hosted runner; HTTP only; no EdgeOne credential',proof:{status:proofResponse.status,marker:proof?.marker,version:proof?.version},homepage:{status:htmlResponse.status,expectedMarkerPresent:html.includes(expected.marker),nonpublishMarkerPresent:html.includes('NONPUBLISH_BRANCH_ONLY_20261016')},production:{status:productionResponse.status,sha256:productionHash,matchesBaseline:productionHash==='2895daa842e3e30dffb2cb6d78dd475cb92c6d5fef7e2f46992336527e4e70c3'}};
-           result.passed=proofResponse.status===200&&proof?.marker===expected.marker&&proof?.version===expected.version&&htmlResponse.status===200&&result.homepage.expectedMarkerPresent&&!result.homepage.nonpublishMarkerPresent&&productionResponse.status===200&&result.production.matchesBaseline;
-           fs.mkdirSync('proof-results',{recursive:true});
-           fs.writeFileSync('proof-results/native-git-boundary-http.json',JSON.stringify(result,null,2));
-           console.log(JSON.stringify(result));
-           if(!result.passed)process.exitCode=1;
-          })().catch(error=>{console.error(error.message);process.exitCode=1;});
-          NODE
+          python <<'PY'
+          """Cloud-only verification of the fixed public snapshot; no author credentials."""
+          import concurrent.futures
+          import hashlib
+          import html
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          import xml.etree.ElementTree as ET
+          
+          from playwright.sync_api import sync_playwright
+          
+          ORIGIN = "https://aj-native-git-proof-20261016-qbkyvyub.edgeone.dev"
+          PRODUCTION = "https://aj.new.tg"
+          EXPECTED_MANIFEST = "a39554e223ddbc9893bac1cb562d21241314c380c53db0457d941ed1387e092c"
+          NONCE = os.environ.get("GITHUB_RUN_ID", "local")
+          OUTPUT = Path("proof-results")
+          OUTPUT.mkdir(exist_ok=True)
+          manifest_bytes = Path("published-manifest.json").read_bytes()
+          assert hashlib.sha256(manifest_bytes).hexdigest() == EXPECTED_MANIFEST
+          manifest = json.loads(manifest_bytes)
+          report = {"source": "GitHub hosted runner; public snapshot only; no EdgeOne credential", "publicationCommit": os.environ.get("PUBLICATION_COMMIT"), "exportId": manifest["exportId"], "checks": {}, "requests": [], "browser": {}}
+          
+          
+          def read_url(origin, route):
+              request = urllib.request.Request(origin + route + ("&" if "?" in route else "?") + "export_check=" + NONCE, headers={"Accept-Encoding": "identity", "User-Agent": "PublishedSnapshotVerification/1.0"})
+              try:
+                  with urllib.request.urlopen(request, timeout=40) as response:
+                      return response.status, dict(response.headers), response.read()
+              except urllib.error.HTTPError as error:
+                  return error.code, dict(error.headers), error.read()
+          
+          
+          def route_for(path):
+              if path == "index.html":
+                  return "/"
+              if path.endswith("/index.html"):
+                  return "/" + path[:-len("index.html")]
+              return "/" + urllib.parse.quote(path)
+          
+          
+          def check_file(file):
+              route = route_for(file["path"])
+              status, headers, body = read_url(ORIGIN, route)
+              digest = hashlib.sha256(body).hexdigest()
+              result = {"path": file["path"], "route": route, "status": status, "bytes": len(body), "sha256": digest, "matchesPublishedSnapshot": digest == file["sha256"] and len(body) == file["bytes"], "contentType": headers.get("Content-Type", headers.get("content-type", ""))}
+              result["passed"] = status == 200 and result["matchesPublishedSnapshot"]
+              if file["path"].endswith((".png", ".webp")):
+                  result["passed"] = result["passed"] and result["contentType"].startswith("image/")
+              return result
+          
+          
+          try:
+              selected = [file for file in manifest["files"] if not file["path"].endswith((".woff", ".woff2")) and file["path"] != "404.html"]
+              with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+                  report["requests"] = list(pool.map(check_file, selected))
+              report["checks"]["publicFilesByteIdentical"] = all(item["passed"] for item in report["requests"])
+              report["checks"]["all23ImagesVerified"] = len(manifest["images"]) == 23 and all(item["passed"] for item in report["requests"] if item["path"].endswith((".png", ".webp")))
+          
+              status, _, body = read_url(ORIGIN, "/__public_export_probe.json")
+              probe = json.loads(body)
+              report["publicationProbe"] = {"status": status, **probe}
+              report["checks"]["correctPublication"] = status == 200 and probe["marker"] == manifest["exportId"] and probe["manifestSha256"] == EXPECTED_MANIFEST and probe["fileCount"] == 846
+          
+              status, _, rss = read_url(ORIGIN, "/rss.xml")
+              items = ET.fromstring(rss).findall("./channel/item")
+              rss_links = [item.findtext("link") for item in items]
+              report["rss"] = {"status": status, "itemCount": len(items), "links": rss_links}
+              report["checks"]["rssContainsOnlyPublishedArticles"] = status == 200 and set(rss_links) == {PRODUCTION + article["route"] for article in manifest["articles"]}
+          
+              negative_routes = ["/articles/ff-private-export-canary/", "/uploads/ff-private-image-canary.webp", "/src/content/articles/ff-private-export-canary.md", "/writer-backups/ff-private-export-backup.txt", "/.env", "/studio/", "/__writer/v1/"]
+              report["privateRoutes"] = []
+              for route in negative_routes:
+                  status, _, body = read_url(ORIGIN, route)
+                  marker_exposed = b"FF_PRIVATE_EXPORT_CANARY_20261016" in body or b"FF_UNPUBLISHED_EDIT_CANARY_20261016" in body
+                  allowed = (403, 404) if route == "/.env" else (404,)
+                  report["privateRoutes"].append({"route": route, "status": status, "privateMarkerExposed": marker_exposed, "passed": status in allowed and not marker_exposed})
+              report["checks"]["privateRoutesExcluded"] = all(item["passed"] for item in report["privateRoutes"])
+          
+              original_checks = []
+              for route, expected_hash in [("/", next(f["sha256"] for f in manifest["files"] if f["path"] == "index.html"))] + [(article["route"], article["sha256"]) for article in manifest["articles"]]:
+                  status, _, body = read_url(PRODUCTION, route)
+                  digest = hashlib.sha256(body).hexdigest()
+                  original_checks.append({"route": route, "status": status, "sha256": digest, "unchanged": status == 200 and digest == expected_hash})
+              report["production"] = original_checks
+              report["checks"]["productionUnchanged"] = all(item["unchanged"] for item in original_checks)
+          
+              with sync_playwright() as playwright:
+                  browser = playwright.chromium.launch(channel="chrome", headless=True)
+                  try:
+                      for name, viewport, mobile in [("desktop", {"width": 1365, "height": 900}, False), ("mobileViewport", {"width": 393, "height": 851}, True)]:
+                          context = browser.new_context(viewport=viewport, is_mobile=mobile, has_touch=mobile)
+                          page = context.new_page()
+                          page.set_default_timeout(60000)
+                          page_errors, failed_requests = [], []
+                          page.on("pageerror", lambda error: page_errors.append(str(error)))
+                          page.on("requestfailed", lambda request: failed_requests.append({"url": request.url, "failure": request.failure}))
+                          readings = []
+                          for index, article in enumerate(manifest["articles"]):
+                              response = page.goto(ORIGIN + article["route"], wait_until="networkidle", timeout=60000)
+                              heading = page.locator("article.reading-sheet h1").inner_text()
+                              image_states = page.locator("img").evaluate_all("images => images.map(image => ({src:image.getAttribute('src'),complete:image.complete,width:image.naturalWidth,height:image.naturalHeight}))")
+                              overflow = page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1")
+                              readings.append({"route": article["route"], "status": response.status, "headingMatches": heading == html.unescape(article["title"]), "images": image_states, "horizontalOverflow": overflow})
+                              if index == 0:
+                                  page.screenshot(path=str(OUTPUT / (name + "-article.png")), full_page=True)
+                          response = page.goto(ORIGIN + "/articles/", wait_until="networkidle", timeout=60000)
+                          links = page.locator("a").evaluate_all("links => links.map(link=>new URL(link.href).pathname)")
+                          list_has_all = all(article["route"].rstrip("/") in {link.rstrip("/") for link in links} for article in manifest["articles"])
+                          if name == "desktop":
+                              page.goto(ORIGIN + "/", wait_until="networkidle", timeout=90000)
+                              decoded = page.evaluate("""async paths => {
+                                const results=[];
+                                for(const path of paths){
+                                  const image=new Image(); image.src='/'+path;
+                                  try {await Promise.race([image.decode(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('decode timeout')),20000))]);results.push({path,width:image.naturalWidth,height:image.naturalHeight,decoded:true});}
+                                  catch(error){results.push({path,decoded:false,error:String(error)});}
+                                }
+                                return results;
+                              }""", [image["path"] for image in manifest["images"]])
+                              report["decodedImages"] = decoded
+                              page.screenshot(path=str(OUTPUT / "desktop-home.png"), full_page=True)
+                          report["browser"][name] = {"readings": readings, "articleListHasAllPublishedArticles": list_has_all, "pageErrors": page_errors, "failedRequests": failed_requests}
+                          context.close()
+                      report["checks"]["allImagesDecodeInBrowser"] = len(report.get("decodedImages", [])) == 23 and all(image["decoded"] and image["width"] > 0 and image["height"] > 0 for image in report["decodedImages"])
+                      report["checks"]["desktopAndMobileReading"] = all(view["articleListHasAllPublishedArticles"] and not view["pageErrors"] and not view["failedRequests"] and all(row["status"] == 200 and row["headingMatches"] and not row["horizontalOverflow"] and all(image["complete"] and image["width"] > 0 for image in row["images"]) for row in view["readings"]) for view in report["browser"].values())
+                  finally:
+                      browser.close()
+          except Exception as error:
+              report["error"] = {"type": type(error).__name__, "message": str(error)}
+          report["passed"] = not report.get("error") and len(report["checks"]) == 8 and all(report["checks"].values())
+          (OUTPUT / "published-export-result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False))
+          sys.exit(0 if report["passed"] else 1)
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
