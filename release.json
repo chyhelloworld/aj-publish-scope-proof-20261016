@@ -1,3 +1,5 @@
 {
-  "marker": "INTENTIONAL_INVALID_JSON_BUILD_PROBE",
-  "version": 3
+  "marker": "native-git-v3-recovered-20261016",
+  "version": 3,
+  "syntheticOnly": true
+}
