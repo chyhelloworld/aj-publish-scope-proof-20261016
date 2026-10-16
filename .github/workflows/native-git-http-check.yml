@@ -1,0 +1,42 @@
+name: Native Git deployment HTTP verification
+on:
+  push:
+    branches: [codex/native-git-http-check]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify native deployment 1 and original production
+        run: |
+          node <<'NODE'
+          const fs=require('node:fs');
+          const crypto=require('node:crypto');
+          (async()=>{
+            const expected={"version":1,"marker":"native-git-v1-d0271e4d43"};
+            const reads=await Promise.all(["https://aj-native-git-proof-20261016-qbkyvyub.edgeone.dev","https://aj-native-git-proof-20261016-dp886ktd1tam.edgeone.dev"].map(async origin=>{
+              try{
+                const response=await fetch(origin+'/proof.json?version='+expected.version,{signal:AbortSignal.timeout(20000)});
+                const body=await response.text();
+                return {origin,status:response.status,markerPresent:body.includes(expected.marker)};
+              }catch(error){return {origin,error:error.name,code:error.cause?.code};}
+            }));
+            const response=await fetch('https://aj.new.tg/',{signal:AbortSignal.timeout(20000)});
+            const hash=crypto.createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex');
+            const production={status:response.status,sha256:hash,matchesBaseline:hash==='2895daa842e3e30dffb2cb6d78dd475cb92c6d5fef7e2f46992336527e4e70c3'};
+            const result={observedAt:new Date().toISOString(),expected,source:'GitHub hosted runner, read-only, no EdgeOne credential',reads,production};
+            result.passed=reads.every(r=>r.status===200&&r.markerPresent)&&production.status===200&&production.matchesBaseline;
+            fs.mkdirSync('proof-results',{recursive:true});
+            fs.writeFileSync('proof-results/native-git-http.json',JSON.stringify(result,null,2));
+            console.log(JSON.stringify(result));
+            if(!result.passed)process.exitCode=1;
+          })().catch(error=>{console.error(error.message);process.exitCode=1;});
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: free-publication-proof
+          path: proof-results/
+          retention-days: 1
