@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'">
+  <title>手机写作验证 · 冒险手记</title>
+  <link rel="stylesheet" href="/author-probe/style.css">
+  <script type="module" src="/author-probe/app.js"></script>
+</head>
+<body>
+  <header class="masthead"><a href="/" class="brand">ADVENTURE JOURNAL<span>冒险手记 · 测试写作室</span></a><span class="test-badge">仅测试</span></header>
+  <main>
+    <section class="intro"><p class="eyebrow">FIELD NOTES / MOBILE PROBE</p><h1>把想法，写在旅途中。</h1><p class="lead">只使用测试文章与图片。这里保存的是私有测试草稿，不会发表到正式博客。</p></section>
+    <section class="login-card" aria-label="登录"><div><strong id="account">正在检查测试服务…</strong><p id="login-detail">登录后可以新建草稿、上传测试图片，再重新打开核对。</p></div><a id="login" class="button primary" href="/api/author/login" aria-disabled="true">使用 GitHub 登录 <span>↗</span></a><button id="logout" class="quiet" hidden>退出登录</button></section>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    <section id="workspace" class="workspace" aria-label="测试草稿编辑器">
+      <aside class="library"><div class="section-heading"><h2>我的测试草稿</h2><button id="new-draft" class="quiet" disabled>＋ 新建</button></div><div id="draft-list" class="draft-list"><p class="empty">登录后，已保存的测试草稿会出现在这里。</p></div></aside>
+      <div class="sheet"><div class="sheet-heading"><span>一页手记</span><span id="save-state">尚未登录</span></div>
+        <fieldset id="editor" disabled>
+          <label class="title-label" for="title">标题</label><input id="title" maxlength="120" placeholder="为这次测试起一个标题" autocomplete="off">
+          <label for="tags">标签 <span class="hint">用逗号分隔，最多 8 个</span></label><input id="tags" placeholder="例如：测试，手机写作" autocomplete="off">
+          <div class="body-label"><label for="body">正文</label><label class="upload" for="image">＋ 测试图片<input id="image" type="file" accept="image/png,image/jpeg,image/webp"></label></div>
+          <textarea id="body" rows="14" placeholder="写下测试文字。支持保存 Markdown 原文，上传后会插入图片引用。"></textarea>
+          <p class="hint">PNG、JPEG、WebP，单张最多 2 MiB。请勿上传私人照片。</p>
+          <div class="actions"><button id="save" class="button primary" type="button">保存草稿</button><button id="preview-toggle" class="quiet" type="button">查看草稿预览</button></div>
+        </fieldset>
+        <section id="preview" class="preview" aria-label="私有草稿预览" hidden><h2>草稿预览</h2><div id="preview-content"></div></section>
+      </div>
+    </section>
+    <footer>写作验证入口 · 保存与发表分开 · 不含正式数据</footer>
+  </main>
+</body>
+</html>

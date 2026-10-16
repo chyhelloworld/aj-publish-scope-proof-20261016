@@ -5,5 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@edgeone/pages-blob": "0.0.18"
   }
 }
