@@ -9,13 +9,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Verify failed-build-keeps-v2
+      - name: Verify recovered-v3
         run: |
           node <<'NODE'
           const fs=require('node:fs');
           const crypto=require('node:crypto');
           (async()=>{
-           const expected={"stage":"failed-build-keeps-v2","version":2,"marker":"native-git-v2-caa84216b9"};
+           const expected={"stage":"recovered-v3","version":3,"marker":"native-git-v3-recovered-20261016"};
            const origin="https://aj-native-git-proof-20261016-qbkyvyub.edgeone.dev";
            const nonce=process.env.GITHUB_RUN_ID+'-'+expected.stage;
            const [proofResponse,htmlResponse,productionResponse]=await Promise.all([
