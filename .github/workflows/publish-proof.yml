@@ -1,0 +1,51 @@
+name: Free single-repository Pages proof
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Generate synthetic page and verify repository credential boundary
+        env:
+          JOB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          (async () => {
+            const headers = {Authorization:'Bearer '+process.env.JOB_TOKEN, Accept:'application/vnd.github+json'};
+            const own = await fetch('https://api.github.com/repos/chyhelloworld/aj-publish-scope-proof-20261016',{headers});
+            const other = await fetch('https://api.github.com/repositories/1421524108',{headers});
+            const scope = {observedAt:new Date().toISOString(),ownRepositoryStatus:own.status,confirmedOtherPrivateRepositoryStatus:other.status,controlExistsVerifiedByOwner:true,externalCredentialsInJob:false};
+            scope.passed = own.status === 200 && [403,404].includes(other.status);
+            fs.mkdirSync('proof-results',{recursive:true});
+            fs.writeFileSync('proof-results/repository-scope.json',JSON.stringify(scope,null,2));
+            if(!scope.passed)throw new Error('Repository scope assertion failed: '+JSON.stringify(scope));
+            const proof = {marker:'scoped-pages-proof-v1-aadc930cca',release:1,commit:process.env.GITHUB_SHA,syntheticOnly:true};
+            fs.mkdirSync('_site',{recursive:true});
+            fs.writeFileSync('_site/proof.json',JSON.stringify(proof,null,2));
+            fs.writeFileSync('_site/index.html','<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="robots" content="noindex"><title>Isolated publishing proof</title><h1>Isolated publishing proof</h1><p>Synthetic content only. No blog source or drafts.</p><p>'+proof.marker+'</p></html>');
+            fs.writeFileSync('proof-results/publication.json',JSON.stringify(proof,null,2));
+            console.log(JSON.stringify({scope,proof}));
+          })().catch(e=>{console.error(e.message);process.exitCode=1;});
+          NODE
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - uses: actions/deploy-pages@v4
+        id: deployment
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: free-publication-proof
+          path: proof-results/
+          retention-days: 1
