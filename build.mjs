@@ -1,6 +1,24 @@
+// Build only the approved public snapshot. This is not the blog source build.
 import fs from 'node:fs/promises';
-const release=JSON.parse(await fs.readFile('release.json','utf8'));
-await fs.mkdir('dist',{recursive:true});
-await fs.writeFile('dist/proof.json',JSON.stringify(release,null,2));
-await fs.writeFile('dist/index.html','<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="robots" content="noindex"><title>Isolated native Git proof</title><h1>Isolated native Git proof</h1><p>Synthetic content only. No blog source, drafts, or images.</p><p>'+release.marker+'</p></html>');
-console.log('Built synthetic release '+release.version+' '+release.marker);
+import path from 'node:path';
+import crypto from 'node:crypto';
+const manifestBytes=await fs.readFile('published-manifest.json');
+const manifest=JSON.parse(manifestBytes);
+const allowedExtensions=new Set(['.html','.xml','.png','.webp','.js','.css','.woff','.woff2']);
+const source=path.resolve('site');
+const output=path.resolve('dist');
+for(const file of manifest.files){
+  if(file.path.startsWith('/')||file.path.includes('\\')||file.path.split('/').includes('..')||!allowedExtensions.has(path.extname(file.path)))throw new Error('Invalid public manifest path');
+  const bytes=await fs.readFile(path.join(source,file.path));
+  if(bytes.length!==file.bytes||crypto.createHash('sha256').update(bytes).digest('hex')!==file.sha256)throw new Error(`Public snapshot mismatch: ${file.path}`);
+}
+await fs.mkdir(output,{recursive:true});
+if((await fs.readdir(output)).length)throw new Error('Public build output must start empty');
+for(const file of manifest.files){
+  const destination=path.join(output,file.path);
+  await fs.mkdir(path.dirname(destination),{recursive:true});
+  await fs.copyFile(path.join(source,file.path),destination);
+}
+const proof={marker:manifest.exportId,manifestSha256:crypto.createHash('sha256').update(manifestBytes).digest('hex'),fileCount:manifest.files.length,articleCount:manifest.articles.length,imageCount:manifest.images.length};
+await fs.writeFile(path.join(output,'__public_export_probe.json'),JSON.stringify(proof,null,2));
+console.log(JSON.stringify({publicSnapshotBuilt:true,...proof}));
