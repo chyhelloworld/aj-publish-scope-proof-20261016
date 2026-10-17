@@ -1,49 +1,34 @@
-name: Verify withdrawn test publication
+name: Isolated test connection baseline
 on:
   push:
     branches: [codex/native-git-http-check]
 permissions:
   contents: read
 jobs:
-  verify:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 4
     steps:
-      - name: Read withdrawn test release from independent cloud network
+      - name: Compare anonymous HTTP 1.1 static and function requests
         run: |
           python3 <<'PY'
-          import urllib.request,urllib.error,json,hashlib,datetime
-          from pathlib import Path
-          expected='e5648566-6b7c-4413-90e4-4259cea01ab4'
-          path='/publication-proof/articles/probe-60f968ca-2d49-456f-b4e1-7a64b0c3122e/'
-          origins=['https://writer-test.aj.new.tg','https://aj-native-git-proof-20261016-dpvtgedmnyxl.edgeone.dev','https://aj-native-git-proof-20261016-qbkyvyub.edgeone.dev']
-          result={'observedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'source':'GitHub Ubuntu runner anonymous HTTP','expectedReleaseId':expected,'checks':[]}
-          for origin in origins:
-           entry={'origin':origin}
-           for label,route in [('marker','/__publication_probe.json'),('article',path)]:
-            try:
-             req=urllib.request.Request(origin+route,headers={'Cache-Control':'no-cache'})
-             try:
-              with urllib.request.urlopen(req,timeout=25) as r: status=r.status;body=r.read();headers=dict(r.headers)
-             except urllib.error.HTTPError as e: status=e.code;body=e.read();headers=dict(e.headers)
-             value={'status':status,'sha256':hashlib.sha256(body).hexdigest(),'lastModified':headers.get('Last-Modified'),'cache':headers.get('EO-Cache-Status')}
-             if label=='marker' and status==200:
-              marker=json.loads(body);value.update({'releaseId':marker.get('releaseId'),'articleCount':marker.get('articleCount'),'matches':marker.get('releaseId')==expected})
-             if label=='article':
-              value['containsA']=b'AJ_PUBLISH_PROBE_20261017_A' in body
-              value['containsPrivateControl']=b'AJ_PRIVATE_PROBE_20261017_9C4A62' in body
-             entry[label]=value
-            except Exception as error:entry[label]={'error':type(error).__name__}
-           result['checks'].append(entry)
-          result['passed']=all(e.get('marker',{}).get('matches') and e.get('article',{}).get('status')==404 and not e.get('article',{}).get('containsPrivateControl') for e in result['checks'])
-          out=Path('proof-results');out.mkdir(exist_ok=True)
-          (out/'publication-withdraw-cloud-check.json').write_text(json.dumps(result,indent=2))
+          import subprocess,json,socket,datetime,pathlib,time
+          out=pathlib.Path('proof-results');out.mkdir()
+          result={'observedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'source':'GitHub Ubuntu runner; anonymous curl HTTP/1.1; no automatic retries','dnsAddresses':sorted({a[4][0] for a in socket.getaddrinfo('writer-test.aj.new.tg',443,type=socket.SOCK_STREAM)}),'curlVersion':subprocess.run(['curl','--version'],capture_output=True,text=True).stdout.splitlines()[0],'checks':[]}
+          for round in range(1,4):
+           for route in ['/__publication_probe.json','/api/author/status']:
+            run=subprocess.run(['curl','--disable','--silent','--show-error','--http1.1','--connect-timeout','5','--max-time','8','--header','Cookie:','--header','Authorization:','--header','Cache-Control: no-cache','--output','/dev/null','--write-out','%{json}','https://writer-test.aj.new.tg'+route],capture_output=True,text=True,timeout=12)
+            value=json.loads(run.stdout)
+            record={'observedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'round':round,'path':route,'exitCode':run.returncode,'status':value.get('http_code'),'error':value.get('errormsg'),'remoteIp':value.get('remote_ip'),'httpVersion':value.get('http_version'),'proxyUsed':value.get('proxy_used'),'dnsSeconds':value.get('time_namelookup'),'tcpSeconds':value.get('time_connect'),'tlsSeconds':value.get('time_appconnect'),'firstByteSeconds':value.get('time_starttransfer'),'totalSeconds':value.get('time_total'),'passed':run.returncode==0 and value.get('http_code')==200}
+            result['checks'].append(record)
+          result['passed']=all(r['passed'] for r in result['checks'])
+          (out/'connection-cloud-baseline.json').write_text(json.dumps(result,indent=2))
           print(json.dumps(result))
           raise SystemExit(0 if result['passed'] else 1)
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: publication-network-check
+          name: connection-cloud-baseline
           path: proof-results/
           retention-days: 1
