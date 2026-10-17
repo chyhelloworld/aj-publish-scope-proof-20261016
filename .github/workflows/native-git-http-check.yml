@@ -1,4 +1,4 @@
-name: Mobile author custom domain HTTPS preflight
+name: Author publication and session recovery proof
 on:
   push:
     branches: [codex/native-git-http-check]
@@ -47,7 +47,7 @@ jobs:
           try:
            status,body=read('/api/author/status');data=json.loads(body);result['status']={'http':status,**data}
            result['privateEndpoints']=[]
-           for path,method,body in [('/api/author/me','GET',None),('/api/author/drafts','GET',None),('/api/author/images/00000000-0000-0000-0000-000000000000','GET',None),('/api/author/drafts','POST',b'{}'),('/api/author/images','POST',b'test')]:
+           for path,method,body in [('/api/author/me','GET',None),('/api/author/drafts','GET',None),('/api/author/images/00000000-0000-0000-0000-000000000000','GET',None),('/api/author/drafts','POST',b'{}'),('/api/author/images','POST',b'test'),('/api/author/publication-status','GET',None),('/api/author/publication','POST',b'{}')]:
             code,content=read(path,method,body);result['privateEndpoints'].append({'path':path,'method':method,'status':code,'errorOnly':set(json.loads(content))=={'error'}})
            code,body=read('/api/author/drafts',cookie='__Host-author_probe_session='+'f'*64);result['unknownSessionStatus']=code
            class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -59,6 +59,8 @@ jobs:
             target=urllib.parse.urlparse(e.headers.get('Location',''));query=urllib.parse.parse_qs(target.query,keep_blank_values=True);cookies=e.headers.get_all('Set-Cookie',[])
             result['loginRedirect']={'status':e.code,'targetOrigin':target.scheme+'://'+target.netloc,'path':target.path,'callback':query.get('redirect_uri'),'emptyScope':query.get('scope')==[''],'pkceS256':query.get('code_challenge_method')==['S256'] and len(query.get('code_challenge',[''])[0])==43,'stateBound':any('__Host-author_probe_state='+query.get('state',['missing'])[0] in c and 'HttpOnly' in c and 'Secure' in c and 'SameSite=Lax' in c for c in cookies)}
            code,_=read('/cloud-functions/author-core.js');result['serverSourceStatus']=code
+           code,body=read('/api/author/public-snapshot');result['publicSnapshot']={'status':code,'payload':json.loads(body)}
+           assert code==200 and json.loads(body)=={'schema':1,'releaseId':'bootstrap','createdAt':None,'articles':[],'assets':[]}
            with urllib.request.urlopen('https://aj.new.tg/',timeout=30) as r:
             result['production']={'status':r.status,'sha256':hashlib.sha256(r.read()).hexdigest()}
            with sync_playwright() as p:
@@ -73,6 +75,48 @@ jobs:
               page.evaluate("document.fonts.ready.then(()=>true)")
               page.screenshot(path=str(out/(name+'-author-configured.png')),full_page=True)
               result['views'].append({'name':name,'status':response.status,'title':page.locator('h1').inner_text(),'loginDisabled':page.locator('#login').get_attribute('aria-disabled')=='true','fieldsetDisabledAttribute':page.locator('#editor').get_attribute('disabled') is not None,'chineseFontLoaded':page.evaluate("Array.from(document.fonts).some(font=>font.family.includes('Noto Serif SC') && font.status==='loaded')"),'editorDisabled':all(page.locator(selector).is_disabled() for selector in ['#title','#tags','#body','#image','#save']),'overflow':page.evaluate('document.documentElement.scrollWidth > innerWidth + 1'),'pageErrors':errors})
+              context.close()
+             # Explicit synthetic API fixtures: browser behavior only, not cloud OAuth evidence.
+             result['sessionUiFixtures']=[]
+             for scenario in ['server401','expiryTimer']:
+              context=browser.new_context(viewport={'width':393,'height':851},is_mobile=True,has_touch=True);page=context.new_page()
+              session={'authenticated':True,'recovered':False,'saved':False,'publishRequests':0}
+              def api_fixture(route):
+               path=urllib.parse.urlparse(route.request.url).path
+               if path.endswith('/status'): payload={'authConfigured':True,'storageReady':True,'publicationConfigured':False}
+               elif path.endswith('/login'):
+                session['authenticated']=True;session['recovered']=True
+                route.fulfill(status=302,headers={'location':origin+'/author-probe/?fixture=recovered'});return
+               elif path.endswith('/me'):
+                payload={'login':'synthetic-owner','expiresAt':int(__import__('time').time()*1000)+(2500 if scenario=='expiryTimer' and not session['recovered'] else 3600000)}
+               elif path.endswith('/publication-status'): payload={'configured':False,'phase':'unconfigured','published':[]}
+               elif path.endswith('/publication'):
+                session['publishRequests']+=1;raise AssertionError('Recovery must never publish')
+               elif path.endswith('/drafts') and route.request.method=='GET': payload={'items':[]}
+               elif path.endswith('/drafts') and route.request.method=='POST':
+                if scenario=='server401' and not session['recovered']:
+                 route.fulfill(status=401,json={'error':'synthetic expired session'});return
+                payload={**json.loads(route.request.post_data),'id':'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','revision':'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','updatedAt':'2026-10-17T00:00:00Z'};session['saved']=True
+               else: raise AssertionError('Unexpected fixture route '+path)
+               route.fulfill(status=200,json=payload)
+              context.route('**/api/author/**',api_fixture)
+              page.goto(origin+'/author-probe/',wait_until='networkidle',timeout=90000)
+              page.locator('#title').fill('重新登录恢复测试')
+              page.locator('#body').fill('UNSAVED_RECOVERY_'+scenario)
+              if scenario=='server401': page.locator('#save').click()
+              page.get_by_text('登录已过期',exact=True).wait_for(timeout=10000)
+              assert page.locator('#body').input_value()=='UNSAVED_RECOVERY_'+scenario
+              assert not page.locator('#body').is_disabled() and page.locator('#save').is_disabled()
+              page.screenshot(path=str(out/('session-'+scenario+'-expired.png')),full_page=True)
+              page.locator('#login').click()
+              page.get_by_text('已恢复登录前的文字。请核对后保存；不会自动发布。',exact=True).wait_for(timeout=10000)
+              assert page.locator('#body').input_value()=='UNSAVED_RECOVERY_'+scenario
+              assert not page.locator('#save').is_disabled()
+              page.locator('#save').click()
+              page.get_by_text('草稿已保存，尚未改变测试站上的公开版本。',exact=True).wait_for(timeout=10000)
+              assert page.evaluate("sessionStorage.getItem('aj-author-relogin-v1')") is None
+              assert session['saved'] and session['publishRequests']==0
+              result['sessionUiFixtures'].append({'scenario':scenario,'passed':True,'apiIsMocked':True,'unsavedTextRestored':True,'noAutomaticPublication':True})
               context.close()
             finally: browser.close()
            result['passed']=status==200 and data['storageReady'] and data['authConfigured'] and all(x['status']==401 and x['errorOnly'] for x in result['privateEndpoints']) and result['unknownSessionStatus']==401 and result['loginRedirect']['status']==303 and result['loginRedirect']['targetOrigin']=='https://github.com' and result['loginRedirect']['callback']==['https://writer-test.aj.new.tg/api/author/callback'] and result['loginRedirect']['emptyScope'] and result['loginRedirect']['pkceS256'] and result['loginRedirect']['stateBound'] and result['serverSourceStatus']==404 and result['production']['sha256']=='2895daa842e3e30dffb2cb6d78dd475cb92c6d5fef7e2f46992336527e4e70c3' and all(v['status']==200 and not v['loginDisabled'] and v['fieldsetDisabledAttribute'] and v['chineseFontLoaded'] and v['editorDisabled'] and not v['overflow'] and not v['pageErrors'] for v in result['views'])
