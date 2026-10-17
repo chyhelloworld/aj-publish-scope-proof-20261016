@@ -1,23 +1,20 @@
-name: Android withdrawal synchronized observation
+name: Android final isolation and unchanged-site checks
 on:
   push:
     branches: [codex/native-git-http-check]
 permissions:
   contents: read
 jobs:
-  observe:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 5
     env:
-      PROBE_PHASE: withdraw
-      BASELINE_RELEASE: 6697c91c-9151-49a4-8caf-3fa7e6194ab6
-      BASELINE_SLUG: probe-79ef12b2-7e36-40f6-ba31-66835c94eaba
+      EXPECTED_WITHDRAW_RELEASE: e86dbd87-bb92-44d2-979a-e548230d2b3f
     steps:
-      - name: Observe user-driven Android withdrawal
+      - name: Verify final public and private boundaries
         run: |
           python3 <<'PY'
-          """Bounded, read-only cloud observation of a user-driven Android test action."""
-          import base64
+          """Final anonymous checks after the Android withdrawal; no credentials or writes."""
           import concurrent.futures
           import datetime
           import hashlib
@@ -25,136 +22,81 @@ jobs:
           import os
           from pathlib import Path
           import re
-          import time
           import urllib.error
           import urllib.request
           
-          CUSTOM = 'https://writer-test.aj.new.tg'
-          PROJECT = 'https://aj-native-git-proof-20261016-qbkyvyub.edgeone.dev'
-          TITLE = '发布链路验证 2026-10-17'
-          IMAGE_HASH = 'cfc37bfd8debfef1e3455d64b100aa0fe13d634d6b5a79c55de691705f62297e'
-          PRIVATE_MARKER = 'AJ_PRIVATE_PROBE_20261017_9C4A62'
-          phase = os.environ['PROBE_PHASE']
-          baseline = os.environ['BASELINE_RELEASE']
-          assert phase in ('a', 'b', 'withdraw') and re.fullmatch(r'[a-f0-9-]{36}', baseline)
-          expected_text = 'ANDROID_PROBE_20261017_' + phase.upper()
-          prior_slug = os.environ.get('BASELINE_SLUG', '')
-          if phase == 'withdraw':
-              assert re.fullmatch(r'probe-[a-f0-9-]{36}', prior_slug)
-          out = Path('proof-results')
-          out.mkdir(exist_ok=True)
+          ORIGIN = 'https://writer-test.aj.new.tg'
+          SOURCE_COMMIT = '410559fa5f7eced7e7ba1df8b6c95343e86ec050'
+          PRODUCTION_HASH = '2895daa842e3e30dffb2cb6d78dd475cb92c6d5fef7e2f46992336527e4e70c3'
+          expected_release = os.environ['EXPECTED_WITHDRAW_RELEASE']
+          assert re.fullmatch(r'[a-f0-9-]{36}', expected_release)
           
           
-          def utc():
-              return datetime.datetime.now(datetime.timezone.utc).isoformat()
-          
-          
-          def read(origin, path):
-              start = time.monotonic()
-              record = {'origin': origin, 'path': path.split('?')[0], 'observedAt': utc()}
+          def read(url, cookie=''):
+              headers = {'Cache-Control': 'no-cache'}
+              if cookie:
+                  headers['Cookie'] = cookie
               try:
-                  request = urllib.request.Request(origin + path, headers={'Cache-Control': 'no-cache'})
-                  try:
-                      response = urllib.request.urlopen(request, timeout=6)
-                  except urllib.error.HTTPError as error:
-                      response = error
-                  with response:
-                      body = response.read(4 * 1024 * 1024 + 1)
-                      record.update(status=response.status, elapsedSeconds=round(time.monotonic()-start, 3), cache=response.headers.get('EO-Cache-Status'), age=response.headers.get('Age'), serverDate=response.headers.get('Date'))
-                  return record, body
-              except Exception as error:
-                  record.update(error=type(error).__name__, elapsedSeconds=round(time.monotonic()-start, 3))
-                  return record, b''
+                  response = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=15)
+              except urllib.error.HTTPError as error:
+                  response = error
+              with response:
+                  return response.status, response.read(4 * 1024 * 1024), dict(response.headers)
           
           
-          def verify_content(snapshot):
-              slug = prior_slug if phase == 'withdraw' else snapshot['articles'][0]['slug']
-              assert re.fullmatch(r'probe-[a-f0-9-]{36}', slug)
-              paths = ['/publication-proof/', '/publication-proof/rss.xml', '/publication-proof/articles/' + slug + '/', '/publication-proof/assets/' + IMAGE_HASH + '.png']
-              with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-                  responses = list(pool.map(lambda path: read(CUSTOM, path), paths))
-              for index, (record, body) in enumerate(responses):
-                  expected_status = 404 if phase == 'withdraw' and index >= 2 else 200
-                  assert record.get('status') == expected_status, 'Public content status mismatch: ' + paths[index]
-                  if index < 3:
-                      text = body.decode('utf-8')
-                      assert PRIVATE_MARKER not in text
-                      if phase == 'withdraw':
-                          assert 'ANDROID_PROBE_20261017_' not in text
-                          if index < 2:
-                              assert slug not in text
-                      elif index in (1, 2):
-                          assert expected_text in text
-                      if phase != 'withdraw' and index == 0:
-                          assert slug in text
-                  elif phase != 'withdraw':
-                      assert hashlib.sha256(body).hexdigest() == IMAGE_HASH
-              if phase != 'withdraw':
-                  asset = snapshot['assets'][0]
-                  assert asset['hash'] == IMAGE_HASH
-                  assert hashlib.sha256(base64.b64decode(asset['data'])).hexdigest() == IMAGE_HASH
-              return [record for record, _ in responses]
-          
-          
-          result = {'phase': phase, 'baselineReleaseId': baseline, 'startedAt': utc(), 'source': 'GitHub Ubuntu runner; real anonymous requests; Android action performed by user', 'automaticRetries': 0, 'pollIntervalSeconds': 20, 'maximumMinutes': 15, 'samples': [], 'passed': False}
-          deadline = time.monotonic() + 15 * 60
-          target = None
-          snapshot = None
-          print(json.dumps({'event': 'monitor-ready', 'phase': phase, 'baseline': baseline, 'at': result['startedAt']}), flush=True)
+          result = {'observedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'source': 'GitHub Ubuntu runner anonymous final boundary checks', 'automaticRetries': 0, 'actualCredentialsSupplied': False, 'sourceCommit': SOURCE_COMMIT, 'passed': False}
           try:
-              while time.monotonic() < deadline:
-                  sample = {'observedAt': utc()}
-                  snapshot_record, body = read(CUSTOM, '/api/author/public-snapshot')
-                  sample['snapshotRequest'] = snapshot_record
-                  if snapshot_record.get('status') == 200:
-                      current = json.loads(body)
-                      sample['selectedReleaseId'] = current['releaseId']
-                      if current['releaseId'] != baseline:
-                          if phase == 'withdraw':
-                              assert not current['articles'] and not current['assets'], 'Unexpected nonempty withdrawal snapshot'
-                          else:
-                              assert len(current['articles']) == 1 and current['articles'][0]['title'] == TITLE
-                              assert expected_text in current['articles'][0]['body'], 'Unexpected publication marker'
-                              assert PRIVATE_MARKER not in body.decode('utf-8')
-                          if target is None:
-                              target = current['releaseId']
-                              snapshot = current
-                              result.update(targetReleaseId=target, selectedCreatedAt=current['createdAt'], snapshotFirstObservedAt=utc())
-                          assert current['releaseId'] == target, 'Another release started before this observation completed'
-                  suffix = '?android-proof=' + str(int(time.time()))
-                  with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-                      responses = list(pool.map(lambda origin: read(origin, '/__publication_probe.json' + suffix), (CUSTOM, PROJECT)))
-                  markers = []
-                  for record, body in responses:
-                      if record.get('status') == 200:
-                          marker = json.loads(body)
-                          record.update(releaseId=marker.get('releaseId'), builtAt=marker.get('builtAt'), articleCount=marker.get('articleCount'))
-                          if target and marker.get('releaseId') == target:
-                              first_key = 'customFirstObservedAt' if record['origin'] == CUSTOM else 'projectFirstObservedAt'
-                              result.setdefault(first_key, record['observedAt'])
-                      markers.append(record)
-                  sample['markers'] = markers
-                  result['samples'].append(sample)
-                  print(json.dumps(sample), flush=True)
-                  if target and all(marker.get('releaseId') == target for marker in markers):
-                      result['contentChecks'] = verify_content(snapshot)
-                      result['articleSlug'] = prior_slug if phase == 'withdraw' else snapshot['articles'][0]['slug']
-                      result['passed'] = True
-                      break
-                  time.sleep(20)
-              if not result['passed']:
-                  result['error'] = 'No requested Android release completed within this bounded observation window'
+              code, body, _ = read('https://raw.githubusercontent.com/chyhelloworld/aj-publish-scope-proof-20261016/' + SOURCE_COMMIT + '/published-manifest.json')
+              assert code == 200
+              manifest = json.loads(body)
+              original_files = [file for file in manifest['files'] if file['path'].endswith(('.html', '.xml'))]
+              assert len(original_files) == 11
+          
+              def check_original(file):
+                  assert re.fullmatch(r'[A-Za-z0-9_./-]+', file['path']) and '..' not in file['path']
+                  status, data, _ = read(ORIGIN + '/' + file['path'])
+                  expected_codes = (200, 404) if file['path'] == '404.html' else (200,)
+                  digest = hashlib.sha256(data).hexdigest()
+                  return {'path': file['path'], 'status': status, 'sha256': digest, 'passed': status in expected_codes and digest == file['sha256'] and b'AJ_PRIVATE_PROBE_20261017_9C4A62' not in data}
+          
+              with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                  result['originalPublicFiles'] = list(pool.map(check_original, original_files))
+              assert all(check['passed'] for check in result['originalPublicFiles'])
+          
+              result['privateEndpoints'] = []
+              for path, cookie in [('/api/author/drafts/0ef9bc69-aaec-4b3c-8456-259b4402ed06', ''), ('/api/author/drafts/57b7682a-6e6c-4540-b34c-ac12a780ca6b', ''), ('/api/author/images/f8c56b3e-6425-4dce-917e-b2b92e1a1b9e', ''), ('/api/author/images/f8c56b3e-6425-4dce-917e-b2b92e1a1b9e', '__Host-author_probe_session=' + 'f'*64)]:
+                  code, body, headers = read(ORIGIN + path, cookie)
+                  payload = json.loads(body)
+                  cache_control = next((value for key, value in headers.items() if key.lower() == 'cache-control'), '')
+                  check = {'path': path, 'forgedSession': bool(cookie), 'status': code, 'errorOnly': set(payload) == {'error'}, 'privateNoStore': 'private' in cache_control and 'no-store' in cache_control}
+                  check['passed'] = code == 401 and check['errorOnly'] and check['privateNoStore']
+                  result['privateEndpoints'].append(check)
+              assert all(check['passed'] for check in result['privateEndpoints'])
+          
+              code, body, _ = read(ORIGIN + '/api/author/public-snapshot')
+              snapshot = json.loads(body)
+              assert code == 200 and snapshot['releaseId'] == expected_release and not snapshot['articles'] and not snapshot['assets']
+              code, body, _ = read(ORIGIN + '/__publication_probe.json')
+              marker = json.loads(body)
+              assert code == 200 and marker['releaseId'] == expected_release and not marker['slugs']
+              result['withdrawal'] = {'releaseId': expected_release, 'publicArticles': 0, 'publicAssets': 0, 'staticMarkerMatched': True}
+          
+              code, body, _ = read('https://aj.new.tg/')
+              digest = hashlib.sha256(body).hexdigest()
+              result['production'] = {'status': code, 'sha256': digest, 'matchesBaseline': code == 200 and digest == PRODUCTION_HASH}
+              assert result['production']['matchesBaseline']
+              result['passed'] = True
           except Exception as error:
               result['error'] = type(error).__name__ + ': ' + str(error)
-          finally:
-              result['finishedAt'] = utc()
-              (out / ('android-' + phase + '-observation.json')).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-              print(json.dumps({'event': 'monitor-result', **result}, ensure_ascii=False), flush=True)
+          out = Path('proof-results')
+          out.mkdir(exist_ok=True)
+          (out/'android-final-boundaries.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+          print(json.dumps(result, ensure_ascii=False))
           raise SystemExit(0 if result['passed'] else 1)
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-withdraw-observation
+          name: android-final-boundaries
           path: proof-results/
           retention-days: 1
