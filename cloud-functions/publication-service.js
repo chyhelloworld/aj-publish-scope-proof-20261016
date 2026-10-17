@@ -9,7 +9,8 @@ export class PublicationError extends Error {
 const fail = (status, message) => { throw new PublicationError(status, message); };
 
 export function createPublicationService({ read, write, readDraft, env, fetchImpl, now, ownerId }) {
-  const configured = () => env.AUTH_ORIGIN === PUBLIC_ORIGIN && /^https:\/\//.test(env.PUBLICATION_DEPLOY_HOOK || '');
+  const configuration = () => ({ originMatches: env.AUTH_ORIGIN === PUBLIC_ORIGIN, hookProvided: !!env.PUBLICATION_DEPLOY_HOOK, hookHttps: /^https:\/\//.test(env.PUBLICATION_DEPLOY_HOOK || '') });
+  const configured = () => { const value = configuration(); return value.originMatches && value.hookHttps; };
   async function load() {
     const stored = await read(STATE_KEY);
     if (!stored) return { release: emptyRelease(), bindings: [], operation: null };
@@ -115,5 +116,5 @@ export function createPublicationService({ read, write, readDraft, env, fetchImp
     state.operation = { action: input.action, draftId: draft.id, requestedAt: now(), triggerError: null };
     return trigger(state);
   }
-  return { configured, change, status: async () => describe(await load()), publicSnapshot: async () => normalizeRelease((await load()).release) };
+  return { configured, configuration, change, status: async () => describe(await load()), publicSnapshot: async () => normalizeRelease((await load()).release) };
 }

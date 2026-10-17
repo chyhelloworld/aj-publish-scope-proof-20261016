@@ -63,7 +63,7 @@ export function createAuthorHandler({getStore,env,fetchImpl=fetch,now=()=>Date.n
       if(route==='/status'&&request.method==='GET'){
         let storageReady=false;
         try{await database().list({prefix:'__health-empty-prefix/',limit:1,consistency:'strong'});storageReady=true;}catch{}
-        return json(200,{testOnly:true,authConfigured:!!ready(),storageReady,maxImageBytes:IMAGE_LIMIT,requestedGitHubScopes:[],publicationConfigured:publication.configured()});
+        return json(200,{testOnly:true,authConfigured:!!ready(),storageReady,maxImageBytes:IMAGE_LIMIT,requestedGitHubScopes:[],publicationConfigured:publication.configured(),publicationConfiguration:publication.configuration()});
       }
       if(route==='/login'&&request.method==='GET'){
         if(!ready())fail(503,'GitHub 测试登录尚未配置。');
