@@ -1,4 +1,4 @@
-name: Isolated writer DNS and trusted TLS diagnosis
+name: Mobile author custom domain HTTPS preflight
 on:
   push:
     branches: [codex/native-git-http-check]
@@ -7,24 +7,77 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 8
     steps:
-      - name: Read public DNS and test origin without credentials
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check playwright==1.64.0
+      - name: Wait for valid HTTPS on the isolated custom domain
         run: |
-          python3 <<'PY'
-          import json,urllib.request,urllib.error,hashlib
+          python <<'PY'
+          import time, urllib.request
+          for attempt in range(15):
+              try:
+                  with urllib.request.urlopen('https://writer-test.aj.new.tg/api/author/status',timeout=8) as response:
+                      if response.status == 200:
+                          print('Verified trusted HTTPS is ready')
+                          break
+              except Exception as error:
+                  print('HTTPS not ready:',type(error).__name__,'attempt',attempt+1)
+              if attempt == 14: raise SystemExit('Trusted HTTPS did not become ready within the bounded wait')
+              time.sleep(15)
+          PY
+      - name: Verify configured login redirect and anonymous isolation
+        run: |
+          python <<'PY'
+          import json, hashlib, urllib.request, urllib.error, urllib.parse
           from pathlib import Path
-          result={'source':'Isolated test domain DNS and trusted TLS diagnosis','authenticatedFlowVerified':False}
+          from playwright.sync_api import sync_playwright
+          origin='https://writer-test.aj.new.tg'
           out=Path('proof-results');out.mkdir(exist_ok=True)
-          for label,url in [('dns','https://dns.google/resolve?name=writer-test.aj.new.tg&type=CNAME'),('http','http://writer-test.aj.new.tg/author-probe/'),('https','https://writer-test.aj.new.tg/api/author/status'),('production','https://aj.new.tg/')]:
+          def read(path,method='GET',body=None,cookie=None):
+           headers={'Content-Type':'application/json','Origin':origin,'X-Author-Probe':'1'}
+           if cookie: headers['Cookie']=cookie
+           req=urllib.request.Request(origin+path,data=body,headers=headers,method=method)
            try:
-            with urllib.request.urlopen(url,timeout=25) as response:
-             body=response.read()
-             result[label]={'status':response.status,'bytes':len(body),'sha256':hashlib.sha256(body).hexdigest()}
-             if label in ('dns','https'):result[label]['data']=json.loads(body)
-           except Exception as error:result[label]={'error':type(error).__name__,'reason':str(getattr(error,'reason',error))}
-          result['passed']=result.get('https',{}).get('status')==200 and result.get('production',{}).get('sha256')=='2895daa842e3e30dffb2cb6d78dd475cb92c6d5fef7e2f46992336527e4e70c3'
-          (out/'dns-tls-diagnosis.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
+            with urllib.request.urlopen(req,timeout=90) as r: return r.status,r.read()
+           except urllib.error.HTTPError as e: return e.code,e.read()
+          result={'source':'Cloud preflight after real GitHub OAuth configuration','authenticatedFlowVerified':False}
+          try:
+           status,body=read('/api/author/status');data=json.loads(body);result['status']={'http':status,**data}
+           result['privateEndpoints']=[]
+           for path,method,body in [('/api/author/me','GET',None),('/api/author/drafts','GET',None),('/api/author/images/00000000-0000-0000-0000-000000000000','GET',None),('/api/author/drafts','POST',b'{}'),('/api/author/images','POST',b'test')]:
+            code,content=read(path,method,body);result['privateEndpoints'].append({'path':path,'method':method,'status':code,'errorOnly':set(json.loads(content))=={'error'}})
+           code,body=read('/api/author/drafts',cookie='__Host-author_probe_session='+'f'*64);result['unknownSessionStatus']=code
+           class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self,req,fp,code,msg,headers,newurl): return None
+           try:
+            urllib.request.build_opener(NoRedirect).open(origin+'/api/author/login',timeout=30)
+            result['loginRedirect']={'status':200}
+           except urllib.error.HTTPError as e:
+            target=urllib.parse.urlparse(e.headers.get('Location',''));query=urllib.parse.parse_qs(target.query,keep_blank_values=True);cookies=e.headers.get_all('Set-Cookie',[])
+            result['loginRedirect']={'status':e.code,'targetOrigin':target.scheme+'://'+target.netloc,'path':target.path,'callback':query.get('redirect_uri'),'emptyScope':query.get('scope')==[''],'pkceS256':query.get('code_challenge_method')==['S256'] and len(query.get('code_challenge',[''])[0])==43,'stateBound':any('__Host-author_probe_state='+query.get('state',['missing'])[0] in c and 'HttpOnly' in c and 'Secure' in c and 'SameSite=Lax' in c for c in cookies)}
+           code,_=read('/cloud-functions/author-core.js');result['serverSourceStatus']=code
+           with urllib.request.urlopen('https://aj.new.tg/',timeout=30) as r:
+            result['production']={'status':r.status,'sha256':hashlib.sha256(r.read()).hexdigest()}
+           with sync_playwright() as p:
+            browser=p.chromium.launch(channel='chrome',headless=True)
+            try:
+             result['views']=[]
+             for name,view,mobile in [('desktop',{'width':1365,'height':900},False),('mobile',{'width':393,'height':851},True)]:
+              context=browser.new_context(viewport=view,is_mobile=mobile,has_touch=mobile);page=context.new_page()
+              errors=[];page.on('pageerror',lambda error: errors.append(str(error)))
+              response=page.goto(origin+'/author-probe/',wait_until='networkidle',timeout=90000)
+              page.wait_for_function("document.getElementById('account').textContent !== '正在检查测试服务…'",timeout=90000)
+              page.evaluate("document.fonts.ready.then(()=>true)")
+              page.screenshot(path=str(out/(name+'-author-configured.png')),full_page=True)
+              result['views'].append({'name':name,'status':response.status,'title':page.locator('h1').inner_text(),'loginDisabled':page.locator('#login').get_attribute('aria-disabled')=='true','fieldsetDisabledAttribute':page.locator('#editor').get_attribute('disabled') is not None,'chineseFontLoaded':page.evaluate("Array.from(document.fonts).some(font=>font.family.includes('Noto Serif SC') && font.status==='loaded')"),'editorDisabled':all(page.locator(selector).is_disabled() for selector in ['#title','#tags','#body','#image','#save']),'overflow':page.evaluate('document.documentElement.scrollWidth > innerWidth + 1'),'pageErrors':errors})
+              context.close()
+            finally: browser.close()
+           result['passed']=status==200 and data['storageReady'] and data['authConfigured'] and all(x['status']==401 and x['errorOnly'] for x in result['privateEndpoints']) and result['unknownSessionStatus']==401 and result['loginRedirect']['status']==303 and result['loginRedirect']['targetOrigin']=='https://github.com' and result['loginRedirect']['callback']==['https://writer-test.aj.new.tg/api/author/callback'] and result['loginRedirect']['emptyScope'] and result['loginRedirect']['pkceS256'] and result['loginRedirect']['stateBound'] and result['serverSourceStatus']==404 and result['production']['sha256']=='2895daa842e3e30dffb2cb6d78dd475cb92c6d5fef7e2f46992336527e4e70c3' and all(v['status']==200 and not v['loginDisabled'] and v['fieldsetDisabledAttribute'] and v['chineseFontLoaded'] and v['editorDisabled'] and not v['overflow'] and not v['pageErrors'] for v in result['views'])
+          except Exception as e: result['passed']=False;result['error']={'type':type(e).__name__,'message':str(e)}
+          (out/'author-preflight.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
           print(json.dumps(result,ensure_ascii=False))
           raise SystemExit(0 if result['passed'] else 1)
           PY
