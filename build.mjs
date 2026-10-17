@@ -2,11 +2,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fetchPublication, buildPublication } from './publication-build.js';
 const manifestBytes=await fs.readFile('published-manifest.json');
 const manifest=JSON.parse(manifestBytes);
 const allowedExtensions=new Set(['.html','.xml','.png','.webp','.js','.css','.woff','.woff2']);
 const source=path.resolve('site');
 const output=path.resolve('dist');
+const publication=await fetchPublication();
 for(const file of manifest.files){
   if(file.path.startsWith('/')||file.path.includes('\\')||file.path.split('/').includes('..')||!allowedExtensions.has(path.extname(file.path)))throw new Error('Invalid public manifest path');
   const bytes=await fs.readFile(path.join(source,file.path));
@@ -23,4 +25,6 @@ const proof={marker:manifest.exportId,manifestSha256:crypto.createHash('sha256')
 await fs.writeFile(path.join(output,'__public_export_probe.json'),JSON.stringify(proof,null,2));
 await fs.mkdir(path.join(output,'author-probe'),{recursive:true});
 for(const name of ['index.html','style.css','app.js','session.js','fonts.css'])await fs.copyFile(path.join('author-probe',name),path.join(output,'author-probe',name));
+const publicationMarker=await buildPublication(publication,output);
+console.log(JSON.stringify({publicationBuilt:true,...publicationMarker}));
 console.log(JSON.stringify({publicSnapshotBuilt:true,...proof}));
