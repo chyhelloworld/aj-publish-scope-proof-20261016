@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
+import { createPublicationService, PublicationError } from './publication-service.js';
 
 const API='/api/author';
 const OWNER='103913273';
@@ -53,14 +54,16 @@ export function createAuthorHandler({getStore,env,fetchImpl=fetch,now=()=>Date.n
     if(![401,403,404].includes(response.status)){await remove(key);fail(503,'存储隔离检查未通过，已停止保存测试数据。');}
     return response.status;
   }
+  const publication=createPublicationService({read,write,readDraft:latest,env,fetchImpl,now,ownerId:OWNER});
   return async function handle(request){
     try{
       const url=new URL(request.url);const route=url.pathname.slice(API.length).replace(/\/$/,'')||'/';
       if(!url.pathname.startsWith(API+'/'))return json(404,{error:'接口不存在。'});
+      if(route==='/public-snapshot'&&request.method==='GET')return json(200,await publication.publicSnapshot());
       if(route==='/status'&&request.method==='GET'){
         let storageReady=false;
         try{await database().list({prefix:'__health-empty-prefix/',limit:1,consistency:'strong'});storageReady=true;}catch{}
-        return json(200,{testOnly:true,authConfigured:!!ready(),storageReady,maxImageBytes:IMAGE_LIMIT,requestedGitHubScopes:[]});
+        return json(200,{testOnly:true,authConfigured:!!ready(),storageReady,maxImageBytes:IMAGE_LIMIT,requestedGitHubScopes:[],publicationConfigured:publication.configured()});
       }
       if(route==='/login'&&request.method==='GET'){
         if(!ready())fail(503,'GitHub 测试登录尚未配置。');
@@ -90,7 +93,9 @@ export function createAuthorHandler({getStore,env,fetchImpl=fetch,now=()=>Date.n
       }
       const user=await session(request);
       if(request.method!=='GET')mutation(request);
-      if(route==='/me'&&request.method==='GET')return json(200,{login:user.login,testOnly:true});
+      if(route==='/me'&&request.method==='GET')return json(200,{login:user.login,expiresAt:user.expiresAt,testOnly:true});
+      if(route==='/publication-status'&&request.method==='GET')return json(200,await publication.status());
+      if(route==='/publication'&&request.method==='POST')return json(202,await publication.change(await bodyJson(request)));
       if(route==='/logout'&&request.method==='POST'){await remove(user.sessionKey);return redirect('/author-probe/',[cookie(SESSION_COOKIE,'',0)]);}
       if(route==='/drafts'&&request.method==='GET'){
         const listed=await database().list({prefix:'drafts/',limit:200,consistency:'strong'});
@@ -140,7 +145,7 @@ export function createAuthorHandler({getStore,env,fetchImpl=fetch,now=()=>Date.n
       }
       return json(404,{error:'接口不存在。'});
     }catch(error){
-      if(error instanceof RequestError)return json(error.status,{error:error.message});
+      if(error instanceof RequestError||error instanceof PublicationError)return json(error.status,{error:error.message});
       console.error('Author probe request failed',error.name);
       return json(503,{error:'测试服务暂时不可用，正文没有被清空，请稍后重试。'});
     }

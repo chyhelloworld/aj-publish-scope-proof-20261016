@@ -22,5 +22,5 @@ for(const file of manifest.files){
 const proof={marker:manifest.exportId,manifestSha256:crypto.createHash('sha256').update(manifestBytes).digest('hex'),fileCount:manifest.files.length,articleCount:manifest.articles.length,imageCount:manifest.images.length};
 await fs.writeFile(path.join(output,'__public_export_probe.json'),JSON.stringify(proof,null,2));
 await fs.mkdir(path.join(output,'author-probe'),{recursive:true});
-for(const name of ['index.html','style.css','app.js','fonts.css'])await fs.copyFile(path.join('author-probe',name),path.join(output,'author-probe',name));
+for(const name of ['index.html','style.css','app.js','session.js','fonts.css'])await fs.copyFile(path.join('author-probe',name),path.join(output,'author-probe',name));
 console.log(JSON.stringify({publicSnapshotBuilt:true,...proof}));

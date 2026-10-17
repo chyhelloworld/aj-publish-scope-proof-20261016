@@ -13,7 +13,7 @@
 <body>
   <header class="masthead"><a href="/" class="brand">ADVENTURE JOURNAL<span>冒险手记 · 测试写作室</span></a><span class="test-badge">仅测试</span></header>
   <main>
-    <section class="intro"><p class="eyebrow">FIELD NOTES / MOBILE PROBE</p><h1>把想法，写在旅途中。</h1><p class="lead">只使用测试文章与图片。这里保存的是私有测试草稿，不会发表到正式博客。</p></section>
+    <section class="intro"><p class="eyebrow">FIELD NOTES / MOBILE PROBE</p><h1>把想法，写在旅途中。</h1><p class="lead">只使用测试文章与图片。保存保留为私有草稿；发布与撤回仅作用于独立测试站。</p></section>
     <section class="login-card" aria-label="登录"><div><strong id="account">正在检查测试服务…</strong><p id="login-detail">登录后可以新建草稿、上传测试图片，再重新打开核对。</p></div><a id="login" class="button primary" href="/api/author/login" aria-disabled="true">使用 GitHub 登录 <span>↗</span></a><button id="logout" class="quiet" hidden>退出登录</button></section>
     <div id="notice" class="notice" role="status" aria-live="polite"></div>
     <section id="workspace" class="workspace" aria-label="测试草稿编辑器">
@@ -27,6 +27,14 @@
           <p class="hint">PNG、JPEG、WebP，单张最多 2 MiB。请勿上传私人照片。</p>
           <div class="actions"><button id="save" class="button primary" type="button">保存草稿</button><button id="preview-toggle" class="quiet" type="button">查看草稿预览</button></div>
         </fieldset>
+        <section class="publication" aria-label="测试发布">
+          <h2>测试发布</h2>
+          <p id="publication-state" role="status">正在检查发布入口…</p>
+          <p id="publication-detail" class="hint">保存草稿不会自动发表。</p>
+          <div class="actions"><button id="publish" class="button primary" disabled>发布到测试站</button><button id="withdraw" class="quiet" disabled>从测试站撤回</button></div>
+          <div class="actions"><a id="published-link" class="quiet" hidden target="_blank" rel="noopener">查看当前测试文章 ↗</a><button id="check-publication" class="quiet">刷新发布状态</button><button id="retry-build" class="quiet" hidden>重试构建</button></div>
+          <p class="hint">发布会生成公开的测试快照。撤回会移除当前测试站内容；旧部署与外部缓存可能仍保留曾公开的版本。</p>
+        </section>
         <section id="preview" class="preview" aria-label="私有草稿预览" hidden><h2>草稿预览</h2><div id="preview-content"></div></section>
       </div>
     </section>

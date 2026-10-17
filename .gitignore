@@ -1,2 +1,4 @@
 /dist/
 /node_modules/
+/.publication-test-*/
+/dist-before-publication-20261017/
