@@ -1,4 +1,4 @@
-name: Android publication B synchronized observation
+name: Android publication B after confirmed draft save
 on:
   push:
     branches: [codex/native-git-http-check]
