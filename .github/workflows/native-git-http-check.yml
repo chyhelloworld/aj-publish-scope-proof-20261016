@@ -1,4 +1,4 @@
-name: Android publication A synchronized observation
+name: Android publication B synchronized observation
 on:
   push:
     branches: [codex/native-git-http-check]
@@ -9,10 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 18
     env:
-      PROBE_PHASE: a
-      BASELINE_RELEASE: e5648566-6b7c-4413-90e4-4259cea01ab4
+      PROBE_PHASE: b
+      BASELINE_RELEASE: 39a3a946-397d-4616-b1d6-0b92c80bc2a0
     steps:
-      - name: Observe user-driven Android publication A
+      - name: Observe user-driven Android publication B
         run: |
           python3 <<'PY'
           """Bounded, read-only cloud observation of a user-driven Android test action."""
@@ -154,6 +154,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-a-observation
+          name: android-b-observation
           path: proof-results/
           retention-days: 1
