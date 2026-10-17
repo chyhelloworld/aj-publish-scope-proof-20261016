@@ -1,34 +1,159 @@
-name: Isolated test connection baseline
+name: Android publication A synchronized observation
 on:
   push:
     branches: [codex/native-git-http-check]
 permissions:
   contents: read
 jobs:
-  diagnose:
+  observe:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 18
+    env:
+      PROBE_PHASE: a
+      BASELINE_RELEASE: e5648566-6b7c-4413-90e4-4259cea01ab4
     steps:
-      - name: Compare anonymous HTTP 1.1 static and function requests
+      - name: Observe user-driven Android publication A
         run: |
           python3 <<'PY'
-          import subprocess,json,socket,datetime,pathlib,time
-          out=pathlib.Path('proof-results');out.mkdir()
-          result={'observedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'source':'GitHub Ubuntu runner; anonymous curl HTTP/1.1; no automatic retries','dnsAddresses':sorted({a[4][0] for a in socket.getaddrinfo('writer-test.aj.new.tg',443,type=socket.SOCK_STREAM)}),'curlVersion':subprocess.run(['curl','--version'],capture_output=True,text=True).stdout.splitlines()[0],'checks':[]}
-          for round in range(1,4):
-           for route in ['/__publication_probe.json','/api/author/status']:
-            run=subprocess.run(['curl','--disable','--silent','--show-error','--http1.1','--connect-timeout','5','--max-time','8','--header','Cookie:','--header','Authorization:','--header','Cache-Control: no-cache','--output','/dev/null','--write-out','%{json}','https://writer-test.aj.new.tg'+route],capture_output=True,text=True,timeout=12)
-            value=json.loads(run.stdout)
-            record={'observedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'round':round,'path':route,'exitCode':run.returncode,'status':value.get('http_code'),'error':value.get('errormsg'),'remoteIp':value.get('remote_ip'),'httpVersion':value.get('http_version'),'proxyUsed':value.get('proxy_used'),'dnsSeconds':value.get('time_namelookup'),'tcpSeconds':value.get('time_connect'),'tlsSeconds':value.get('time_appconnect'),'firstByteSeconds':value.get('time_starttransfer'),'totalSeconds':value.get('time_total'),'passed':run.returncode==0 and value.get('http_code')==200}
-            result['checks'].append(record)
-          result['passed']=all(r['passed'] for r in result['checks'])
-          (out/'connection-cloud-baseline.json').write_text(json.dumps(result,indent=2))
-          print(json.dumps(result))
+          """Bounded, read-only cloud observation of a user-driven Android test action."""
+          import base64
+          import concurrent.futures
+          import datetime
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import time
+          import urllib.error
+          import urllib.request
+          
+          CUSTOM = 'https://writer-test.aj.new.tg'
+          PROJECT = 'https://aj-native-git-proof-20261016-qbkyvyub.edgeone.dev'
+          TITLE = '发布链路验证 2026-10-17'
+          IMAGE_HASH = 'cfc37bfd8debfef1e3455d64b100aa0fe13d634d6b5a79c55de691705f62297e'
+          PRIVATE_MARKER = 'AJ_PRIVATE_PROBE_20261017_9C4A62'
+          phase = os.environ['PROBE_PHASE']
+          baseline = os.environ['BASELINE_RELEASE']
+          assert phase in ('a', 'b', 'withdraw') and re.fullmatch(r'[a-f0-9-]{36}', baseline)
+          expected_text = 'ANDROID_PROBE_20261017_' + phase.upper()
+          prior_slug = os.environ.get('BASELINE_SLUG', '')
+          if phase == 'withdraw':
+              assert re.fullmatch(r'probe-[a-f0-9-]{36}', prior_slug)
+          out = Path('proof-results')
+          out.mkdir(exist_ok=True)
+          
+          
+          def utc():
+              return datetime.datetime.now(datetime.timezone.utc).isoformat()
+          
+          
+          def read(origin, path):
+              start = time.monotonic()
+              record = {'origin': origin, 'path': path.split('?')[0], 'observedAt': utc()}
+              try:
+                  request = urllib.request.Request(origin + path, headers={'Cache-Control': 'no-cache'})
+                  try:
+                      response = urllib.request.urlopen(request, timeout=6)
+                  except urllib.error.HTTPError as error:
+                      response = error
+                  with response:
+                      body = response.read(4 * 1024 * 1024 + 1)
+                      record.update(status=response.status, elapsedSeconds=round(time.monotonic()-start, 3), cache=response.headers.get('EO-Cache-Status'), age=response.headers.get('Age'), serverDate=response.headers.get('Date'))
+                  return record, body
+              except Exception as error:
+                  record.update(error=type(error).__name__, elapsedSeconds=round(time.monotonic()-start, 3))
+                  return record, b''
+          
+          
+          def verify_content(snapshot):
+              slug = prior_slug if phase == 'withdraw' else snapshot['articles'][0]['slug']
+              assert re.fullmatch(r'probe-[a-f0-9-]{36}', slug)
+              paths = ['/publication-proof/', '/publication-proof/rss.xml', '/publication-proof/articles/' + slug + '/', '/publication-proof/assets/' + IMAGE_HASH + '.png']
+              with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                  responses = list(pool.map(lambda path: read(CUSTOM, path), paths))
+              for index, (record, body) in enumerate(responses):
+                  expected_status = 404 if phase == 'withdraw' and index >= 2 else 200
+                  assert record.get('status') == expected_status, 'Public content status mismatch: ' + paths[index]
+                  if index < 3:
+                      text = body.decode('utf-8')
+                      assert PRIVATE_MARKER not in text
+                      if phase == 'withdraw':
+                          assert 'ANDROID_PROBE_20261017_' not in text
+                          if index < 2:
+                              assert slug not in text
+                      elif index in (1, 2):
+                          assert expected_text in text
+                      if phase != 'withdraw' and index == 0:
+                          assert slug in text
+                  elif phase != 'withdraw':
+                      assert hashlib.sha256(body).hexdigest() == IMAGE_HASH
+              if phase != 'withdraw':
+                  asset = snapshot['assets'][0]
+                  assert asset['hash'] == IMAGE_HASH
+                  assert hashlib.sha256(base64.b64decode(asset['data'])).hexdigest() == IMAGE_HASH
+              return [record for record, _ in responses]
+          
+          
+          result = {'phase': phase, 'baselineReleaseId': baseline, 'startedAt': utc(), 'source': 'GitHub Ubuntu runner; real anonymous requests; Android action performed by user', 'automaticRetries': 0, 'pollIntervalSeconds': 20, 'maximumMinutes': 15, 'samples': [], 'passed': False}
+          deadline = time.monotonic() + 15 * 60
+          target = None
+          snapshot = None
+          print(json.dumps({'event': 'monitor-ready', 'phase': phase, 'baseline': baseline, 'at': result['startedAt']}), flush=True)
+          try:
+              while time.monotonic() < deadline:
+                  sample = {'observedAt': utc()}
+                  snapshot_record, body = read(CUSTOM, '/api/author/public-snapshot')
+                  sample['snapshotRequest'] = snapshot_record
+                  if snapshot_record.get('status') == 200:
+                      current = json.loads(body)
+                      sample['selectedReleaseId'] = current['releaseId']
+                      if current['releaseId'] != baseline:
+                          if phase == 'withdraw':
+                              assert not current['articles'] and not current['assets'], 'Unexpected nonempty withdrawal snapshot'
+                          else:
+                              assert len(current['articles']) == 1 and current['articles'][0]['title'] == TITLE
+                              assert expected_text in current['articles'][0]['body'], 'Unexpected publication marker'
+                              assert PRIVATE_MARKER not in body.decode('utf-8')
+                          if target is None:
+                              target = current['releaseId']
+                              snapshot = current
+                              result.update(targetReleaseId=target, selectedCreatedAt=current['createdAt'], snapshotFirstObservedAt=utc())
+                          assert current['releaseId'] == target, 'Another release started before this observation completed'
+                  suffix = '?android-proof=' + str(int(time.time()))
+                  with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                      responses = list(pool.map(lambda origin: read(origin, '/__publication_probe.json' + suffix), (CUSTOM, PROJECT)))
+                  markers = []
+                  for record, body in responses:
+                      if record.get('status') == 200:
+                          marker = json.loads(body)
+                          record.update(releaseId=marker.get('releaseId'), builtAt=marker.get('builtAt'), articleCount=marker.get('articleCount'))
+                          if target and marker.get('releaseId') == target:
+                              first_key = 'customFirstObservedAt' if record['origin'] == CUSTOM else 'projectFirstObservedAt'
+                              result.setdefault(first_key, record['observedAt'])
+                      markers.append(record)
+                  sample['markers'] = markers
+                  result['samples'].append(sample)
+                  print(json.dumps(sample), flush=True)
+                  if target and all(marker.get('releaseId') == target for marker in markers):
+                      result['contentChecks'] = verify_content(snapshot)
+                      result['articleSlug'] = prior_slug if phase == 'withdraw' else snapshot['articles'][0]['slug']
+                      result['passed'] = True
+                      break
+                  time.sleep(20)
+              if not result['passed']:
+                  result['error'] = 'No requested Android release completed within this bounded observation window'
+          except Exception as error:
+              result['error'] = type(error).__name__ + ': ' + str(error)
+          finally:
+              result['finishedAt'] = utc()
+              (out / ('android-' + phase + '-observation.json')).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+              print(json.dumps({'event': 'monitor-result', **result}, ensure_ascii=False), flush=True)
           raise SystemExit(0 if result['passed'] else 1)
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: connection-cloud-baseline
+          name: android-a-observation
           path: proof-results/
           retention-days: 1
