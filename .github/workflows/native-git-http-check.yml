@@ -1,4 +1,4 @@
-name: Compare publication deployment and custom domain
+name: Verify withdrawn test publication
 on:
   push:
     branches: [codex/native-git-http-check]
@@ -9,14 +9,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Read exact publication A from independent cloud network
+      - name: Read withdrawn test release from independent cloud network
         run: |
           python3 <<'PY'
           import urllib.request,urllib.error,json,hashlib,datetime
           from pathlib import Path
-          expected='0203ed3d-63ff-49a8-b77f-b30363191de9'
+          expected='e5648566-6b7c-4413-90e4-4259cea01ab4'
           path='/publication-proof/articles/probe-60f968ca-2d49-456f-b4e1-7a64b0c3122e/'
-          origins=['https://writer-test.aj.new.tg','https://aj-native-git-proof-20261016-dpi1d7vb2tyb.edgeone.dev','https://aj-native-git-proof-20261016-qbkyvyub.edgeone.dev']
+          origins=['https://writer-test.aj.new.tg','https://aj-native-git-proof-20261016-dpvtgedmnyxl.edgeone.dev','https://aj-native-git-proof-20261016-qbkyvyub.edgeone.dev']
           result={'observedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'source':'GitHub Ubuntu runner anonymous HTTP','expectedReleaseId':expected,'checks':[]}
           for origin in origins:
            entry={'origin':origin}
@@ -35,9 +35,9 @@ jobs:
              entry[label]=value
             except Exception as error:entry[label]={'error':type(error).__name__}
            result['checks'].append(entry)
-          result['passed']=all(e.get('marker',{}).get('matches') and e.get('article',{}).get('containsA') and not e.get('article',{}).get('containsPrivateControl') for e in result['checks'])
+          result['passed']=all(e.get('marker',{}).get('matches') and e.get('article',{}).get('status')==404 and not e.get('article',{}).get('containsPrivateControl') for e in result['checks'])
           out=Path('proof-results');out.mkdir(exist_ok=True)
-          (out/'publication-network-check.json').write_text(json.dumps(result,indent=2))
+          (out/'publication-withdraw-cloud-check.json').write_text(json.dumps(result,indent=2))
           print(json.dumps(result))
           raise SystemExit(0 if result['passed'] else 1)
           PY
