@@ -1,4 +1,4 @@
-name: Android publication B after confirmed draft save
+name: Android withdrawal synchronized observation
 on:
   push:
     branches: [codex/native-git-http-check]
@@ -9,10 +9,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 18
     env:
-      PROBE_PHASE: b
-      BASELINE_RELEASE: 39a3a946-397d-4616-b1d6-0b92c80bc2a0
+      PROBE_PHASE: withdraw
+      BASELINE_RELEASE: 6697c91c-9151-49a4-8caf-3fa7e6194ab6
+      BASELINE_SLUG: probe-79ef12b2-7e36-40f6-ba31-66835c94eaba
     steps:
-      - name: Observe user-driven Android publication B
+      - name: Observe user-driven Android withdrawal
         run: |
           python3 <<'PY'
           """Bounded, read-only cloud observation of a user-driven Android test action."""
@@ -154,6 +155,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-b-observation
+          name: android-withdraw-observation
           path: proof-results/
           retention-days: 1
