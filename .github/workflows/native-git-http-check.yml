@@ -1,4 +1,4 @@
-name: Mobile author configured OAuth preflight
+name: Mobile author custom domain HTTPS preflight
 on:
   push:
     branches: [codex/native-git-http-check]
@@ -13,13 +13,28 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install --disable-pip-version-check playwright==1.64.0
+      - name: Wait for valid HTTPS on the isolated custom domain
+        run: |
+          python <<'PY'
+          import time, urllib.request
+          for attempt in range(15):
+              try:
+                  with urllib.request.urlopen('https://writer-test.aj.new.tg/api/author/status',timeout=8) as response:
+                      if response.status == 200:
+                          print('Verified trusted HTTPS is ready')
+                          break
+              except Exception as error:
+                  print('HTTPS not ready:',type(error).__name__,'attempt',attempt+1)
+              if attempt == 14: raise SystemExit('Trusted HTTPS did not become ready within the bounded wait')
+              time.sleep(15)
+          PY
       - name: Verify configured login redirect and anonymous isolation
         run: |
           python <<'PY'
           import json, hashlib, urllib.request, urllib.error, urllib.parse
           from pathlib import Path
           from playwright.sync_api import sync_playwright
-          origin='https://aj-native-git-proof-20261016-qbkyvyub.edgeone.dev'
+          origin='https://writer-test.aj.new.tg'
           out=Path('proof-results');out.mkdir(exist_ok=True)
           def read(path,method='GET',body=None,cookie=None):
            headers={'Content-Type':'application/json','Origin':origin,'X-Author-Probe':'1'}
