@@ -1,4 +1,4 @@
-name: Android final isolation and unchanged-site checks
+name: Git writer isolation and unchanged-site checks
 on:
   push:
     branches: [codex/native-git-http-check]
@@ -26,7 +26,7 @@ jobs:
           import urllib.request
           
           ORIGIN = 'https://writer-test.aj.new.tg'
-          SOURCE_COMMIT = '410559fa5f7eced7e7ba1df8b6c95343e86ec050'
+          SOURCE_COMMIT = '217f30c5fb2a612a3a7de1f8f0a96f2f18f65ae4'
           PRODUCTION_HASH = '2895daa842e3e30dffb2cb6d78dd475cb92c6d5fef7e2f46992336527e4e70c3'
           expected_release = os.environ['EXPECTED_WITHDRAW_RELEASE']
           assert re.fullmatch(r'[a-f0-9-]{36}', expected_release)
@@ -85,18 +85,30 @@ jobs:
               digest = hashlib.sha256(body).hexdigest()
               result['production'] = {'status': code, 'sha256': digest, 'matchesBaseline': code == 200 and digest == PRODUCTION_HASH}
               assert result['production']['matchesBaseline']
+              result['gitWriter'] = []
+              for file, expected_hash in {"index.html":"767b6763c9185dcaace3bc93d7c89b4f2f547b7eefff4ccd9e4c087c11b55870","app.js":"531770f91a401e3aa4e212fc5002221860298e236e25be32cf9f9fb808ba02d3","style.css":"4c513758a25960eeff6aa79bbb0edf3de278510e6106f95cd4f26cf868e71025"}.items():
+                  code, data, _ = read(ORIGIN + '/git-writer/' + file)
+                  result['gitWriter'].append({'file': file, 'status': code, 'matches': code == 200 and hashlib.sha256(data).hexdigest() == expected_hash})
+              assert all(check['matches'] for check in result['gitWriter'])
+              result['gitPrivateEndpoints'] = []
+              for path in ['/api/author/git-articles', '/api/author/git-articles/git-writer-cloud-20261018']:
+                  code, data, headers = read(ORIGIN + path)
+                  result['gitPrivateEndpoints'].append({'path': path, 'status': code})
+                  assert code == 401
+              code, _, _ = read(ORIGIN + '/articles/git-writer-cloud-20261018.md')
+              assert code == 404
               result['passed'] = True
           except Exception as error:
               result['error'] = type(error).__name__ + ': ' + str(error)
           out = Path('proof-results')
           out.mkdir(exist_ok=True)
-          (out/'android-final-boundaries.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+          (out/'git-writer-boundaries.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
           print(json.dumps(result, ensure_ascii=False))
           raise SystemExit(0 if result['passed'] else 1)
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-final-boundaries
+          name: git-writer-boundaries
           path: proof-results/
           retention-days: 1
