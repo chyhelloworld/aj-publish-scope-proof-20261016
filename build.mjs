@@ -25,6 +25,8 @@ const proof={marker:manifest.exportId,manifestSha256:crypto.createHash('sha256')
 await fs.writeFile(path.join(output,'__public_export_probe.json'),JSON.stringify(proof,null,2));
 await fs.mkdir(path.join(output,'author-probe'),{recursive:true});
 for(const name of ['index.html','style.css','app.js','session.js','fonts.css'])await fs.copyFile(path.join('author-probe',name),path.join(output,'author-probe',name));
+await fs.mkdir(path.join(output,'git-content-probe'),{recursive:true});
+for(const name of ['index.html','app.js'])await fs.copyFile(path.join('git-content-probe',name),path.join(output,'git-content-probe',name));
 const publicationMarker=await buildPublication(publication,output);
 console.log(JSON.stringify({publicationBuilt:true,...publicationMarker}));
 console.log(JSON.stringify({publicSnapshotBuilt:true,...proof}));

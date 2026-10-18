@@ -1,5 +1,7 @@
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { createPublicationService, PublicationError } from './publication-service.js';
+import { createGitContentProof } from './private-git-proof.js';
+import { GitProbeError } from './private-git-client.js';
 
 const API='/api/author';
 const OWNER='103913273';
@@ -55,6 +57,7 @@ export function createAuthorHandler({getStore,env,fetchImpl=fetch,now=()=>Date.n
     return response.status;
   }
   const publication=createPublicationService({read,write,readDraft:latest,env,fetchImpl,now,ownerId:OWNER});
+  const gitProof=createGitContentProof({env,read,write,provePrivate:unsignedReadMustFail,fetchImpl});
   return async function handle(request){
     try{
       const url=new URL(request.url);const route=url.pathname.slice(API.length).replace(/\/$/,'')||'/';
@@ -94,6 +97,16 @@ export function createAuthorHandler({getStore,env,fetchImpl=fetch,now=()=>Date.n
       const user=await session(request);
       if(request.method!=='GET')mutation(request);
       if(route==='/me'&&request.method==='GET')return json(200,{login:user.login,expiresAt:user.expiresAt,testOnly:true});
+      if(route==='/git-content-proof/status'&&request.method==='GET')return json(200,gitProof.configuration());
+      const gitAction=route.match(/^\/git-content-proof\/(create|race|backup|restore)$/);
+      if(gitAction&&request.method==='POST')return json(200,await gitProof.step(gitAction[1],(await bodyJson(request)).runId));
+      const gitResult=route.match(/^\/git-content-proof\/result\/([a-f0-9-]{36})$/);
+      if(gitResult&&request.method==='GET')return json(200,await gitProof.result(gitResult[1]));
+      const gitImage=route.match(/^\/git-content-proof\/image\/([a-f0-9-]{36})$/);
+      if(gitImage&&request.method==='GET'){
+        const image=await gitProof.image(gitImage[1]);
+        return new Response(Buffer.from(image.data,'base64'),{headers:{...PRIVATE_HEADERS,'Content-Type':image.mime}});
+      }
       if(route==='/publication-status'&&request.method==='GET')return json(200,await publication.status());
       if(route==='/publication'&&request.method==='POST')return json(202,await publication.change(await bodyJson(request)));
       if(route==='/logout'&&request.method==='POST'){await remove(user.sessionKey);return redirect('/author-probe/',[cookie(SESSION_COOKIE,'',0)]);}
@@ -145,7 +158,7 @@ export function createAuthorHandler({getStore,env,fetchImpl=fetch,now=()=>Date.n
       }
       return json(404,{error:'接口不存在。'});
     }catch(error){
-      if(error instanceof RequestError||error instanceof PublicationError)return json(error.status,{error:error.message});
+      if(error instanceof RequestError||error instanceof PublicationError||error instanceof GitProbeError)return json(error.status,{error:error.message});
       console.error('Author probe request failed',error.name);
       return json(503,{error:'测试服务暂时不可用，正文没有被清空，请稍后重试。'});
     }
