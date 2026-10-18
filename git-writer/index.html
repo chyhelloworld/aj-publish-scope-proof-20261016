@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="same-origin"><meta name="robots" content="noindex,nofollow"><title>写作室 · 私有 Git 测试</title><link rel="stylesheet" href="/author-probe/fonts.css"><link rel="stylesheet" href="/author-probe/style.css"><link rel="stylesheet" href="/git-writer/style.css"></head>
+<body><header class="masthead"><a class="brand" href="/">ADVENTURE JOURNAL<span>冒险手记 · 写作室</span></a><span class="test-badge">私有 Git 测试</span></header>
+<main><section class="intro"><p class="eyebrow">FIELD NOTES / WRITE ANYWHERE</p><h1>把今天，留在纸页上。</h1><p class="lead">图文留在私有空间。保存只是草稿，准备好后再发表。</p></section>
+<section class="login-card" aria-label="登录"><div><strong id="account">正在检查登录…</strong><p id="login-detail">此入口只使用合成文章与测试图片，正文保存到独立私有仓库。</p></div><a id="login" class="button primary" href="/api/author/login?returnTo=%2Fgit-writer%2F">使用 GitHub 登录 ↗</a><button id="logout" class="quiet" hidden>退出</button></section>
+<p id="notice" class="notice" role="status" aria-live="polite"></p>
+<div class="workspace"><aside class="library"><div class="section-heading"><h2>我的私有草稿</h2><button id="new" class="quiet" disabled>＋ 新建</button></div><div id="draft-list" class="draft-list"><p class="empty">登录后读取私有仓库。</p></div><p class="hint">当前入口暂不提供发布。旧验证稿不会自动搬入。</p></aside>
+<section class="sheet"><div class="sheet-heading"><span>一页新的手记</span><span id="save-state">尚未登录</span></div><fieldset id="fields" disabled>
+<label class="title-label" for="title">标题</label><input id="title" autocomplete="off" placeholder="给这段经历起个名字">
+<details id="article-details"><summary>文章信息 <span>网址、摘要、日期与关联</span></summary><div class="metadata-grid">
+<div><label for="slug">文章网址</label><input id="slug" pattern="[a-z0-9]+(-[a-z0-9]+)*" spellcheck="false"><p class="hint">仅首次保存前可修改，之后保持原网址。</p></div>
+<div><label for="date">文章日期</label><input id="date" type="date"></div>
+<div class="wide"><label for="description">摘要</label><textarea id="description" rows="2" placeholder="留空时取正文开头，可稍后修改"></textarea></div>
+<div><label for="series">系列名称（可留空）</label><input id="series"></div><div><label for="seriesOrder">系列顺序</label><input id="seriesOrder" type="number" min="1" step="1"></div>
+<div><label for="product">关联产品网址（可留空）</label><input id="product" placeholder="例如 decision-notes"></div><div><label for="updatedDate">修订日期（可留空）</label><input id="updatedDate" type="date"></div>
+<div class="wide"><label for="updateNote">修订说明</label><input id="updateNote"></div><label class="check wide"><input id="sample" type="checkbox" checked>标记为演示文章</label></div></details>
+<label for="tags">标签 <span class="hint">用逗号分隔</span></label><input id="tags" placeholder="测试，手机写作">
+<div class="body-label"><label>正文</label><div class="editor-tabs" role="group" aria-label="正文编辑方式"><button id="rich-tab" type="button" class="quiet" aria-pressed="true">排版编辑</button><button id="source-tab" type="button" class="quiet" aria-pressed="false">Markdown</button></div></div>
+<div id="toolbar" class="toolbar" role="toolbar" aria-label="正文格式"><button type="button" data-command="bold" aria-label="加粗"><b>B</b></button><button type="button" data-command="italic" aria-label="斜体"><i>I</i></button><button type="button" data-command="heading" aria-label="二级标题">H2</button><button type="button" data-command="bulletList" aria-label="无序列表">• 列表</button><button type="button" data-command="orderedList" aria-label="有序列表">1. 列表</button><button type="button" data-command="blockquote" aria-label="引用">引用</button><button type="button" data-command="codeBlock" aria-label="代码块">代码</button><button type="button" data-command="table" aria-label="插入表格">表格</button><button type="button" data-command="undo" aria-label="撤销">↶</button><button type="button" data-command="redo" aria-label="重做">↷</button></div>
+<div id="rich"></div><textarea id="source" aria-label="Markdown 正文" hidden spellcheck="false"></textarea>
+<p id="editor-hint" class="hint" hidden>这篇文章含暂不支持的排版格式，使用 Markdown 可完整保留原文。</p>
+<div class="image-controls"><label class="upload">＋ 添加图片<input id="image" type="file" accept="image/png,image/jpeg,image/webp"></label><span class="hint">较大的 PNG/JPEG 会在手机上缩小后上传，原文件不改动。</span></div>
+<p id="image-state" class="hint" role="status"></p>
+<p class="hint">手机验图可先<a href="/git-writer/fixtures/large-rotated-test.jpg" download>下载合成方向测试图</a>，再点“添加图片”选择它。正确预览应横向显示，TOP 在上方；请勿使用私人照片。</p>
+</fieldset>
+<div class="actions writer-actions"><button id="save" class="button primary" disabled>保存私有草稿</button><button id="preview-toggle" class="quiet" disabled>查看预览</button><button id="check-remote" class="quiet" hidden>检查云端结果</button></div>
+<section id="remote-panel" class="remote-panel" hidden><h2>云端版本</h2><p id="remote-note"></p><pre id="remote-content"></pre><button id="use-remote" class="quiet">采用云端版本</button></section>
+<section id="preview" class="preview" hidden><h2>仅自己可见的预览</h2><h3 id="preview-title"></h3><div id="preview-content" class="prose"></div></section></section></div>
+<footer>只用测试数据 · 保存与发表分开 · 不采集写作内容</footer></main><script type="module" src="/git-writer/app.js"></script></body></html>

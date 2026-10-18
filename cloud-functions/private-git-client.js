@@ -172,27 +172,58 @@ export async function openPrivateGit({
     insist(
       /^(working|published|recovered|recovered-published)\/probe-[a-f0-9-]{36}\.md$/.test(
         file,
-      ),
-      '只允许当前合成测试文件路径。',
+      ) || /^articles\/[a-z0-9]+(?:-[a-z0-9]+)*\.md$/.test(file),
+      '文章文件路径无效。',
     );
     return `/repos/${REPO}/contents/${file}`;
   }
   return {
     evidence,
+    async listArticles() {
+      const result = await request(
+        `/repos/${REPO}/contents/articles?ref=${encodeURIComponent(BRANCH)}`,
+        token,
+      );
+      if (result.status === 404) return [];
+      insist(
+        result.status === 200 && Array.isArray(result.data),
+        '暂时无法读取文章列表。',
+      );
+      insist(
+        result.data.length < 1000,
+        '文章目录达到接口列表上限，请先调整目录后继续。',
+      );
+      return result.data
+        .filter(
+          (item) =>
+            item.type === 'file' &&
+            /^articles\/[a-z0-9]+(?:-[a-z0-9]+)*\.md$/.test(item.path),
+        )
+        .map((item) => item.path);
+    },
     async read(file) {
       const result = await request(
         `${contentPath(file)}?ref=${encodeURIComponent(BRANCH)}`,
         token,
       );
+      if (result.status === 404) return null;
       insist(
         result.status === 200 &&
           result.data?.type === 'file' &&
-          result.data.encoding === 'base64',
-        '合成 Markdown 未完整读回。',
+          /^[a-f0-9]{40}$/.test(result.data.sha),
+        'Markdown 未完整读回。',
+      );
+      const blob =
+        result.data.encoding === 'base64'
+          ? result
+          : await request(`/repos/${REPO}/git/blobs/${result.data.sha}`, token);
+      insist(
+        blob.status === 200 && blob.data?.encoding === 'base64',
+        'Markdown 文件内容不可用。',
       );
       return {
         sha: result.data.sha,
-        raw: Buffer.from(result.data.content, 'base64').toString('utf8'),
+        raw: Buffer.from(blob.data.content, 'base64').toString('utf8'),
       };
     },
     async write(file, raw, sha) {

@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypt
 import { createPublicationService, PublicationError } from './publication-service.js';
 import { createGitContentProof } from './private-git-proof.js';
 import { GitProbeError } from './private-git-client.js';
+import { createGitArticleStore } from './git-article-store.js';
 
 const API='/api/author';
 const OWNER='103913273';
@@ -18,6 +19,7 @@ const cookie=(name,value,age)=>`${name}=${value}; Max-Age=${age}; Path=/; HttpOn
 const cookies=request=>Object.fromEntries((request.headers.get('cookie')||'').split(';').map(part=>part.trim().split(/=(.*)/s).slice(0,2)).filter(pair=>pair.length===2));
 const equal=(a,b)=>{if(typeof a!=='string'||typeof b!=='string')return false;const left=Buffer.from(a);const right=Buffer.from(b);return left.length===right.length&&timingSafeEqual(left,right);};
 const writes={cacheControl:'private, no-store'};
+const returnPath=value=>['/author-probe/','/git-content-probe/','/git-writer/'].includes(value)?value:'/author-probe/';
 
 // Dependency injection is for local contract tests. The deployed wrapper always
 // uses the project-managed Blob SDK and the real GitHub endpoints.
@@ -39,8 +41,8 @@ export function createAuthorHandler({getStore,env,fetchImpl=fetch,now=()=>Date.n
     if(!stored||stored.expiresAt<=now()||String(stored.userId)!==OWNER)fail(401,'登录已失效，请重新登录。');
     return {...stored,sessionKey:`sessions/${value}.json`};
   }
-  async function bodyJson(request){
-    const text=await request.text();if(Buffer.byteLength(text)>250000)fail(413,'本次测试的正文请控制在 250 KB 以内。');
+  async function bodyJson(request,limit=250000){
+    const text=await request.text();if(Buffer.byteLength(text)>limit)fail(413,'请求内容过大，请缩短正文后保存。');
     try{return JSON.parse(text);}catch{fail(400,'请求格式不正确。');}
   }
   async function versions(id){
@@ -58,6 +60,7 @@ export function createAuthorHandler({getStore,env,fetchImpl=fetch,now=()=>Date.n
   }
   const publication=createPublicationService({read,write,readDraft:latest,env,fetchImpl,now,ownerId:OWNER});
   const gitProof=createGitContentProof({env,read,write,provePrivate:unsignedReadMustFail,fetchImpl});
+  const gitArticles=createGitArticleStore({env,fetchImpl});
   return async function handle(request){
     try{
       const url=new URL(request.url);const route=url.pathname.slice(API.length).replace(/\/$/,'')||'/';
@@ -71,7 +74,7 @@ export function createAuthorHandler({getStore,env,fetchImpl=fetch,now=()=>Date.n
       if(route==='/login'&&request.method==='GET'){
         if(!ready())fail(503,'GitHub 测试登录尚未配置。');
         const state=randomBytes(32).toString('hex');const verifier=randomBytes(32).toString('base64url');
-        await write(`oauth/${state}.json`,{verifier,expiresAt:now()+10*60*1000});
+        await write(`oauth/${state}.json`,{verifier,returnTo:returnPath(url.searchParams.get('returnTo')),expiresAt:now()+10*60*1000});
         const target=new URL('https://github.com/login/oauth/authorize');
         target.search=new URLSearchParams({client_id:config().clientId,redirect_uri:config().origin+API+'/callback',scope:'',state,code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256',allow_signup:'false'}).toString();
         return redirect(target.href,[cookie(STATE_COOKIE,state,600)]);
@@ -82,21 +85,25 @@ export function createAuthorHandler({getStore,env,fetchImpl=fetch,now=()=>Date.n
         if(!state||!TOKEN.test(state)||!equal(state,stateCookie))fail(400,'登录校验失败，请从写作页面重新开始。');
         const pending=await read(`oauth/${state}.json`);await remove(`oauth/${state}.json`);
         if(!pending||pending.expiresAt<=now())fail(400,'登录请求已过期，请重新开始。');
-        if(!url.searchParams.get('code'))return redirect(config().origin+'/author-probe/?login=cancelled',[cookie(STATE_COOKIE,'',0)]);
+        if(!url.searchParams.get('code'))return redirect(config().origin+returnPath(pending.returnTo)+'?login=cancelled',[cookie(STATE_COOKIE,'',0)]);
         const tokenResponse=await fetchImpl('https://github.com/login/oauth/access_token',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({client_id:config().clientId,client_secret:config().clientSecret,code:url.searchParams.get('code'),redirect_uri:config().origin+API+'/callback',code_verifier:pending.verifier}),signal:AbortSignal.timeout(15000)});
         const token=await tokenResponse.json();
         if(!tokenResponse.ok||!token.access_token||String(token.scope||'').trim())fail(403,'GitHub 登录权限不符合测试范围。');
         const profileResponse=await fetchImpl('https://api.github.com/user',{headers:{Authorization:`Bearer ${token.access_token}`,Accept:'application/vnd.github+json','User-Agent':'AdventureJournalAuthorProbe'},signal:AbortSignal.timeout(15000)});
         const profile=await profileResponse.json();
-        if(!profileResponse.ok||String(profile.id)!==OWNER)return redirect(config().origin+'/author-probe/?login=denied',[cookie(STATE_COOKIE,'',0),cookie(SESSION_COOKIE,'',0)]);
+        if(!profileResponse.ok||String(profile.id)!==OWNER)return redirect(config().origin+returnPath(pending.returnTo)+'?login=denied',[cookie(STATE_COOKIE,'',0),cookie(SESSION_COOKIE,'',0)]);
         const sessionId=randomBytes(32).toString('hex');
         await write(`sessions/${sessionId}.json`,{userId:profile.id,login:profile.login,expiresAt:now()+60*60*1000});
         // The GitHub access token is deliberately not persisted or returned.
-        return redirect(config().origin+'/author-probe/',[cookie(STATE_COOKIE,'',0),cookie(SESSION_COOKIE,sessionId,3600)]);
+        return redirect(config().origin+returnPath(pending.returnTo),[cookie(STATE_COOKIE,'',0),cookie(SESSION_COOKIE,sessionId,3600)]);
       }
       const user=await session(request);
       if(request.method!=='GET')mutation(request);
       if(route==='/me'&&request.method==='GET')return json(200,{login:user.login,expiresAt:user.expiresAt,testOnly:true});
+      if(route==='/git-articles'&&request.method==='GET')return json(200,await gitArticles.list());
+      if(route==='/git-articles'&&request.method==='POST')return json(200,await gitArticles.save(await bodyJson(request,4*1024*1024)));
+      const articleMatch=route.match(/^\/git-articles\/([a-z0-9]+(?:-[a-z0-9]+)*)$/);
+      if(articleMatch&&request.method==='GET')return json(200,await gitArticles.read(articleMatch[1]));
       if(route==='/git-content-proof/status'&&request.method==='GET')return json(200,gitProof.configuration());
       const gitAction=route.match(/^\/git-content-proof\/(create|race|backup|restore)$/);
       if(gitAction&&request.method==='POST')return json(200,await gitProof.step(gitAction[1],(await bodyJson(request)).runId));
